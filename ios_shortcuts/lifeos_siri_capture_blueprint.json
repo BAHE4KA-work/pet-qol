@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "shortcut_name": "LifeOS Capture",
+  "siri_phrase_ru": "Запиши в LifeOS",
+  "siri_phrase_en": "Capture to LifeOS",
+  "description": "Instant Siri / iPhone Action Button voice capture directly into LifeOS with confidence=1.0.",
+  "triggers": [
+    "Siri voice command",
+    "iPhone Action Button",
+    "Lock Screen / Control Center widget"
+  ],
+  "endpoint": "POST https://<your-lifeos-domain>/api/v1/shortcuts/siri",
+  "actions": [
+    {
+      "step": 1,
+      "action": "Dictate Text",
+      "options": {
+        "stop_listening": "After Pause",
+        "language": "Auto / Russian / English"
+      },
+      "output_var": "captured_text"
+    },
+    {
+      "step": 2,
+      "action": "If captured_text does not have any value",
+      "then": "Stop This Shortcut"
+    },
+    {
+      "step": 3,
+      "action": "Get Contents of URL",
+      "method": "POST",
+      "url": "https://<your-lifeos-domain>/api/v1/shortcuts/siri",
+      "headers": {
+        "Authorization": "Bearer <LIFEOS_API_BEARER_TOKEN>",
+        "Content-Type": "application/json"
+      },
+      "request_body": {
+        "text": "<captured_text>",
+        "captured_at": "<Current Date ISO8601>"
+      },
+      "output_var": "api_response"
+    },
+    {
+      "step": 4,
+      "action": "Get Dictionary Value",
+      "keys": ["title", "status"],
+      "from": "api_response"
+    },
+    {
+      "step": 5,
+      "action": "Show Notification / Speak Text",
+      "message_ru": "Добавлено в LifeOS: <api_response.title>",
+      "message_en": "Added to LifeOS: <api_response.title>"
+    }
+  ]
+}

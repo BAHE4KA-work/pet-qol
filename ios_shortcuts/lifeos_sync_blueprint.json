@@ -1,0 +1,156 @@
+{
+  "schema_version": "1.0",
+  "shortcut_name": "LifeOS Sync",
+  "description": "Adaptive bidirectional Apple Reminders, Apple Notes, and Apple Health sync with LifeOS.",
+  "requirements": {
+    "ios_min_version": "17.0",
+    "reminders_list": "LifeOS",
+    "notes_folder": "LifeOS",
+    "healthkit_permissions": [
+      "Sleep Analysis",
+      "Active Energy",
+      "Heart Rate Variability",
+      "Resting Heart Rate"
+    ],
+    "endpoint": "POST https://<your-lifeos-domain>/api/v1/shortcuts/sync",
+    "auth_header": "Authorization: Bearer <LIFEOS_API_BEARER_TOKEN>"
+  },
+  "focus_guard": {
+    "skip_focus_modes": ["Sleep", "Сон", "Rest", "Отдых"],
+    "min_interval_seconds": 12600,
+    "state_file": "iCloud Drive/Shortcuts/lifeos_last_sync.json",
+    "actions": [
+      {
+        "step": 1,
+        "action": "Get Current Focus",
+        "output_var": "current_focus"
+      },
+      {
+        "step": 2,
+        "action": "Get File (if exists)",
+        "path": "iCloud Drive/Shortcuts/lifeos_last_sync.json",
+        "output_var": "last_sync_json"
+      },
+      {
+        "step": 3,
+        "action": "Calculate elapsed_seconds = Current Date (Unix) - last_sync_json.last_sync_epoch"
+      },
+      {
+        "step": 4,
+        "action": "If current_focus Name is in ['Sleep', 'Сон', 'Rest', 'Отдых'] AND elapsed_seconds < 12600",
+        "then": "Stop This Shortcut"
+      }
+    ]
+  },
+  "gather_payload": {
+    "reminders": {
+      "action": "Find Reminders",
+      "filter": {
+        "list": "LifeOS",
+        "modified_within_hours": 48
+      },
+      "map_fields": {
+        "apple_reminder_id": "Reminder.Identifier",
+        "lifeos_task_id": "Match Regex '\\[lifeos:([^\\s\\]]+)\\]' in Reminder.Notes (Group 1, optional)",
+        "title": "Reminder.Title",
+        "notes": "Reminder.Notes",
+        "is_completed": "Reminder.Is Completed",
+        "completed_at": "Reminder.Completion Date (ISO8601)",
+        "due_at": "Reminder.Due Date (ISO8601)"
+      }
+    },
+    "notes": {
+      "action": "Find Notes",
+      "filter": {
+        "folder": "LifeOS",
+        "modified_within_hours": 48
+      },
+      "map_fields": {
+        "note_id": "Note.Identifier",
+        "title": "Note.Name",
+        "body": "Note.Body",
+        "modified_at": "Note.Last Modified Date (ISO8601)"
+      }
+    },
+    "health": {
+      "window_hours": 24,
+      "metrics": {
+        "sleep_hours": "Find Health Samples (Sleep Analysis, Asleep stages, last 24h) -> Sum duration in hours",
+        "active_energy_kcal": "Find Health Samples (Active Energy, last 24h) -> Sum in kcal",
+        "hrv_ms": "Find Health Samples (Heart Rate Variability, last 24h) -> Average in ms",
+        "resting_hr": "Find Health Samples (Resting Heart Rate, last 24h) -> Average in bpm"
+      }
+    }
+  },
+  "http_request": {
+    "action": "Get Contents of URL",
+    "method": "POST",
+    "url": "https://<your-lifeos-domain>/api/v1/shortcuts/sync",
+    "headers": {
+      "Authorization": "Bearer <LIFEOS_API_BEARER_TOKEN>",
+      "Content-Type": "application/json"
+    },
+    "request_body_type": "JSON",
+    "request_body": {
+      "synced_at": "<Current Date ISO8601>",
+      "focus_mode": "<current_focus.Name>",
+      "reminders": "<gathered_reminders>",
+      "notes": "<gathered_notes>",
+      "health": {
+        "sleep_hours": "<sleep_hours>",
+        "active_energy_kcal": "<active_energy_kcal>",
+        "hrv_ms": "<hrv_ms>",
+        "resting_hr": "<resting_hr>"
+      }
+    }
+  },
+  "apply_reminders_diff": {
+    "description": "Idempotently apply response.reminders_diff using embedded [lifeos:<task_id>] tag.",
+    "loop_over": "response.reminders_diff",
+    "item_var": "diff",
+    "actions": [
+      {
+        "step": 1,
+        "action": "Find Reminders where List is 'LifeOS' AND Notes contains diff.lifeos_tag",
+        "output_var": "existing_matches"
+      },
+      {
+        "step": 2,
+        "condition": "diff.action == 'upsert'",
+        "if_exists": {
+          "action": "Edit Reminder",
+          "target": "existing_matches[0]",
+          "set": {
+            "Title": "diff.title",
+            "Notes": "diff.notes",
+            "Due Date": "diff.due_at if diff.has_exact_time else Clear"
+          }
+        },
+        "if_not_exists": {
+          "action": "Add New Reminder",
+          "list": "LifeOS",
+          "title": "diff.title",
+          "notes": "diff.notes",
+          "alert_due_at": "diff.due_at if diff.has_exact_time else None"
+        }
+      },
+      {
+        "step": 3,
+        "condition": "diff.action == 'complete' AND existing_matches is not empty",
+        "action": "Edit Reminder -> Set Is Completed = True"
+      },
+      {
+        "step": 4,
+        "condition": "diff.action == 'delete' AND existing_matches is not empty",
+        "action": "Remove Reminders (existing_matches)"
+      }
+    ]
+  },
+  "post_sync": {
+    "action": "Save JSON to iCloud Drive/Shortcuts/lifeos_last_sync.json",
+    "content": {
+      "last_sync_epoch": "<Current Date Unix Timestamp>",
+      "daily_budget": "<response.daily_budget>"
+    }
+  }
+}
